@@ -70,6 +70,6 @@ erDiagram
     CASE }o--o{ PREDICTION_RESULT : "相似病例<br>每个结果最多 5 条"
     DATA_SOURCE }o--o{ CASE : "按疾病同步<br>逻辑关系"
 
-    %% CASE_SNAPSHOT 的两个外键是业务逻辑关联，当前数据库未声明物理外键约束。
-    %% DATA_SOURCE 与 CASE 的关系按疾病类型匹配；CHAT_SESSION 和 PREDICTION_RESULT 不持久化。
+    %% CASE_SNAPSHOT 和 PREDICTION_RESULT 的外键为逻辑关联，当前数据库未声明物理外键约束。
+    %% DATA_SOURCE 与 CASE 按疾病类型匹配；CHAT_SESSION 和 PREDICTION_RESULT 不持久化。
 ```
