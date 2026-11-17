@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_file
+from flask_socketio import SocketIO
 import os
-import sys
 import requests
 import io
 import csv
@@ -32,33 +32,19 @@ from utils.db_config import get_db_connection
 
 from utils.getAllData import *
 from utils.getPublicData import *
-from machine.tree import *
+
+# ================= service 层（重构后替代原 machine/tree.py 与 spiders/crawler_scheduler.py） =================
+from service.crawler_service import crawler_service, disease_types
+from service.prediction_service import prediction_service
+from service.scheduler_service import scheduler_service
 
 load_dotenv()
 
-# ================= [新增] AI 模块导入 =================
-try:
-    # 尝试从 machine/tree.py 导入 MedicalAI 类
-    from machine.tree import MedicalAI
-except ImportError as e:
-    print(f"⚠️ 导入模型失败，请检查 machine/tree.py 是否存在。错误: {e}")
-    MedicalAI = None
-
-# ================= [新增] 爬虫调度模块导入 =================
-try:
-    spiders_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'spiders')
-    if spiders_dir not in sys.path:
-        sys.path.append(spiders_dir)
-    from crawler_scheduler import crawler_scheduler, disease_types
-except ImportError as e:
-    print(f"⚠️ 导入爬虫调度模块失败，请检查 spiders/crawler_scheduler.py 是否存在。错误: {e}")
-    crawler_scheduler = None
-    disease_types = []
-
 app = Flask(__name__)
 
-# ================= [新增] AI 引擎初始化 =================
-ai_engine = None
+# WebSocket：用于定时采集完成后向浏览器主动推送 data_updated 事件。
+# async_mode='threading' 与 APScheduler 的后台线程天然兼容，无需额外异步框架。
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # ================= [新增] 数据管理相关配置 =================
 
@@ -409,24 +395,13 @@ def _create_version_with_snapshot(conn, action, description, operator='系统', 
 
 
 def init_ai_model():
-    """
-    Flask 启动时执行：加载之前由 tree.py 训练并保存好的模型文件。
-    """
-    global ai_engine
-    if MedicalAI:
-        print("\n[System] 正在初始化 AI 服务...")
-        ai_engine = MedicalAI()
-        try:
-            # 直接加载文件，不进行训练，实现秒开
-            ai_engine.load_model()
-            print("[System] ✅ AI 模型加载成功，服务已就绪！")
-        except FileNotFoundError:
-            print("[System] ⚠️ 未找到模型文件 (medical_model.pth)。")
-            print("请务必先在 PyCharm 中右键运行 'machine/tree.py' 进行首次训练！")
-        except Exception as e:
-            print(f"[System] ❌ 模型加载出错: {e}")
-    else:
-        print("[System] 未找到 machine/tree.py，跳过 AI 初始化。")
+    """Flask 启动时执行：加载病例数据并初始化预测服务（service 层单例）。"""
+    print("\n[System] 正在初始化 AI 服务...")
+    try:
+        prediction_service.load_model()
+        print("[System] ✅ AI 预测服务就绪（策略：{}）！".format(prediction_service.current_strategy_name))
+    except Exception as e:
+        print(f"[System] ❌ 预测服务初始化失败: {e}")
 
 
 # 启动时立即执行加载
@@ -493,17 +468,9 @@ def submitModel():
                     'data': {'resultData': '症状文本不能为空'}
                 })
 
-            # [修改] 1. 检查 AI 引擎是否正常启动
-            if ai_engine is None:
-                return jsonify({
-                    'message': 'AI服务未就绪',
-                    'code': 500,
-                    'data': {'resultData': '后台 AI 模型未加载，请检查服务器日志'}
-                })
-
-            # [修改] 2. 调用 BERT 模型预测
-            # ai_engine.predict 返回结构：{'prediction': {...}, 'similar_cases': [...]}
-            ai_result = ai_engine.predict(content)
+            # 委托 service 层预测（策略模式：具体算法可在运行期切换）
+            # predict 返回结构：{'prediction': {...}, 'similar_cases': [...]}
+            ai_result = prediction_service.predict(content)
 
             prediction = ai_result['prediction']
             similar_cases = ai_result['similar_cases']
@@ -696,130 +663,114 @@ def toggle_data_source(code):
             conn.close()
 
 
-@app.route('/data/sources/<code>/run', methods=['POST'])
-def run_data_source(code):
-    """手动触发某个爬虫数据源执行爬取。"""
-    if crawler_scheduler is None:
-        return jsonify({
-            'message': 'error',
-            'code': 500,
-            'data': {'error': '爬虫调度模块未正确加载，无法执行爬取'}
-        }), 500
+def execute_crawl_with_status(code, pages=3, trigger='manual'):
+    """执行一次采集并维护 data_sources 状态机 + 版本快照。
 
-    conn = None
-    cursor = None
+    该函数是「手动触发（HTTP 接口）」与「定时触发（APScheduler）」共用的
+    业务编排：状态流转 running -> success/error、统计新增条数、记录版本。
+    采集本身委托给 service 层单例 crawler_service。
+
+    trigger: 'manual'（手动点击）或 'schedule'（定时任务）。
+    返回 dict：{code, disease, delta, success, error}；数据源不存在/停用/运行中时
+    通过 ValueError 抛出，由调用方决定如何呈现。
+    """
+    conn = _get_db_conn()
     try:
-        body = request.get_json(force=True, silent=True) or {}
-        pages = int(body.get('pages') or 3)
-
-        conn = _get_db_conn()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT id, disease, enabled, status FROM data_sources WHERE code=%s",
-            (code,)
-        )
-        row = cursor.fetchone()
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, disease, enabled, status FROM data_sources WHERE code=%s",
+                (code,)
+            )
+            row = cursor.fetchone()
         if not row:
-            return jsonify({'message': 'not_found', 'code': 404, 'data': {}}), 404
+            raise ValueError('数据源不存在: {}'.format(code))
 
         _, disease, enabled, status = row
         if not int(enabled):
-            return jsonify({
-                'message': 'error',
-                'code': 400,
-                'data': {'error': '该数据源已停用，请先启用后再执行'}
-            }), 400
-
+            raise ValueError('该数据源已停用，请先启用后再执行')
         if status == 'running':
-            return jsonify({
-                'message': 'error',
-                'code': 400,
-                'data': {'error': '该数据源正在采集中，请稍后再试'}
-            }), 400
+            raise ValueError('该数据源正在采集中，请稍后再试')
 
         # 标记为运行中
-        cursor.execute(
-            "UPDATE data_sources SET status='running', last_run_at=NOW(), last_message=NULL WHERE code=%s",
-            (code,)
-        )
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE data_sources SET status='running', last_run_at=NOW(), last_message=NULL WHERE code=%s",
+                (code,)
+            )
         conn.commit()
 
         # 采集前病例总数（按疾病类型）
-        conn2 = _get_db_conn()
-        cur2 = conn2.cursor()
-        cur2.execute("SELECT COUNT(*) FROM cases WHERE type=%s", (disease,))
-        before_cnt = cur2.fetchone()[0] or 0
-        cur2.close()
-        conn2.close()
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cases WHERE type=%s", (disease,))
+            before_cnt = cursor.fetchone()[0] or 0
 
+        # 委托 service 层执行采集（单例 CrawlerService + 工厂创建的数据源）
         ok = False
         error_msg = ''
         try:
-            ok = bool(crawler_scheduler.crawl_disease(disease, pages=pages))
+            ok = bool(crawler_service.crawl_disease(disease, pages=pages))
         except Exception as e:
-            ok = False
             error_msg = str(e)
 
         # 采集完成后重新统计
-        conn3 = _get_db_conn()
-        cur3 = conn3.cursor()
-        cur3.execute("SELECT COUNT(*) FROM cases WHERE type=%s", (disease,))
-        after_cnt = cur3.fetchone()[0] or 0
-        cur3.close()
-        conn3.close()
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cases WHERE type=%s", (disease,))
+            after_cnt = cursor.fetchone()[0] or 0
 
         delta = int(after_cnt) - int(before_cnt)
 
-        conn4 = _get_db_conn()
-        cur4 = conn4.cursor()
-        if ok:
-            cur4.execute(
-                "UPDATE data_sources SET status='success', last_success_at=NOW(), "
-                "last_delta=%s, total_records=%s, last_message=%s WHERE code=%s",
-                (delta, after_cnt, f"本次采集新增 {delta} 条记录", code)
-            )
-        else:
-            cur4.execute(
-                "UPDATE data_sources SET status='error', last_delta=%s, last_message=%s WHERE code=%s",
-                (delta, error_msg or '爬虫执行失败', code)
-            )
+        trigger_label = '定时采集' if trigger == 'schedule' else '手动爬取'
+        with conn.cursor() as cursor:
+            if ok:
+                cursor.execute(
+                    "UPDATE data_sources SET status='success', last_success_at=NOW(), "
+                    "last_delta=%s, total_records=%s, last_message=%s WHERE code=%s",
+                    (delta, after_cnt, f"本次{trigger_label}新增 {delta} 条记录", code)
+                )
+            else:
+                cursor.execute(
+                    "UPDATE data_sources SET status='error', last_delta=%s, last_message=%s WHERE code=%s",
+                    (delta, error_msg or '爬虫执行失败', code)
+                )
 
         # 记录版本与快照
         try:
             _create_version_with_snapshot(
-                conn4,
+                conn,
                 action='crawl',
-                description=f"数据源 {code}（{disease}）手动爬取，新增 {delta} 条记录",
-                operator='爬虫采集',
+                description=f"数据源 {code}（{disease}）{trigger_label}，新增 {delta} 条记录",
+                operator='定时采集' if trigger == 'schedule' else '爬虫采集',
                 delta_records=delta
             )
         except Exception as e:
             print("创建爬虫版本记录失败：", e)
 
-        conn4.commit()
-        cur4.close()
-        conn4.close()
+        conn.commit()
 
-        return jsonify({
-            'message': 'success',
-            'code': 200,
-            'data': {
-                'code': code,
-                'disease': disease,
-                'delta': delta,
-                'success': ok,
-                'error': error_msg
-            }
-        })
+        return {
+            'code': code,
+            'disease': disease,
+            'delta': delta,
+            'success': ok,
+            'error': error_msg
+        }
+    finally:
+        conn.close()
+
+
+@app.route('/data/sources/<code>/run', methods=['POST'])
+def run_data_source(code):
+    """手动触发某个爬虫数据源执行爬取。"""
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        pages = int(body.get('pages') or 3)
+        result = execute_crawl_with_status(code, pages=pages, trigger='manual')
+        return jsonify({'message': 'success', 'code': 200, 'data': result})
+    except ValueError as e:
+        return jsonify({'message': 'error', 'code': 400, 'data': {'error': str(e)}}), 400
     except Exception as e:
         print("数据源手动执行接口异常：", e)
         return jsonify({'message': 'error', 'code': 500, 'data': {'error': str(e)}}), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
 
 
 @app.route('/data/import/template', methods=['GET'])
@@ -2270,5 +2221,107 @@ def ai_report():
     })
 
 
+# ================= 预测策略管理（策略模式对外接口） =================
+
+@app.route('/api/prediction/strategies', methods=['GET'])
+def list_prediction_strategies():
+    """列出全部可切换的预测策略及当前激活项。"""
+    return jsonify({
+        'message': 'success',
+        'code': 200,
+        'data': {
+            'current': prediction_service.current_strategy_name,
+            'strategies': prediction_service.available_strategies(),
+        }
+    })
+
+
+@app.route('/api/prediction/strategy', methods=['POST'])
+def switch_prediction_strategy():
+    """运行期切换预测算法（策略模式：切换对调用方透明，无需重启服务）。"""
+    body = request.get_json(force=True, silent=True) or {}
+    name = body.get('name', '')
+    try:
+        prediction_service.set_strategy(name)
+        return jsonify({
+            'message': 'success',
+            'code': 200,
+            'data': {'current': prediction_service.current_strategy_name}
+        })
+    except ValueError as e:
+        return jsonify({'message': 'error', 'code': 400, 'data': {'error': str(e)}}), 400
+
+
+# ================= 定时调度管理（APScheduler） =================
+
+@app.route('/api/scheduler/status', methods=['GET'])
+def scheduler_status():
+    """查询定时调度器状态：是否运行、上次/下次触发时间、最近一轮结果。"""
+    next_run = scheduler_service.next_run_time
+    last_run = scheduler_service.last_run_at
+    return jsonify({
+        'message': 'success',
+        'code': 200,
+        'data': {
+            'running': scheduler_service.running,
+            'intervalMinutes': SCHEDULE_INTERVAL_MINUTES,
+            'lastRunAt': last_run.strftime('%Y-%m-%d %H:%M:%S') if last_run else None,
+            'nextRunAt': next_run.strftime('%Y-%m-%d %H:%M:%S') if next_run else None,
+            'lastResults': scheduler_service.last_results,
+        }
+    })
+
+
+@app.route('/api/scheduler/run', methods=['POST'])
+def scheduler_run_now():
+    """立即触发一轮全量采集（等价于定时任务到点执行，走同一套状态机）。"""
+    results = scheduler_service.run_once(execute_crawl_with_status)
+    return jsonify({'message': 'success', 'code': 200, 'data': {'results': results}})
+
+
+# ================= WebSocket：实时数据更新推送 =================
+
+@socketio.on('connect', namespace='/ws/updates')
+def handle_updates_connect():
+    """前端大屏建立实时更新通道。"""
+    print('[WS] 客户端已接入实时更新通道: {}'.format(request.sid))
+    socketio.emit('connected', {'status': 'subscribed'}, namespace='/ws/updates', room=request.sid)
+
+
+def broadcast_crawl_result(result):
+    """观察者回调：采集完成后向所有在线前端广播 data_updated 事件。
+
+    由 scheduler_service 在每个数据源采集完成时调用（APScheduler 线程内），
+    flask-socketio 的 socketio.emit 在请求上下文之外可直接用于广播。
+    """
+    socketio.emit('data_updated', {
+        'code': result.get('code'),
+        'disease': result.get('disease'),
+        'delta': result.get('delta', 0),
+        'success': result.get('success', False),
+        'error': result.get('error', ''),
+        'at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    }, namespace='/ws/updates')
+
+
+def reload_prediction_on_new_data(result):
+    """观察者回调：采集到新增病例后重建预测索引（TF-IDF 索引增量保鲜）。"""
+    if result.get('success') and result.get('delta', 0) > 0:
+        prediction_service.reload()
+
+
+# 定时采集周期（分钟），可用环境变量覆盖
+SCHEDULE_INTERVAL_MINUTES = int(os.getenv('CRAWL_INTERVAL_MINUTES', '30'))
+
+# 注册观察者：service 层不依赖 Flask，通过回调挂入 WebSocket 广播与索引重建
+scheduler_service.add_listener(broadcast_crawl_result)
+scheduler_service.add_listener(reload_prediction_on_new_data)
+
+# 启动定时调度：每 SCHEDULE_INTERVAL_MINUTES 分钟对所有启用的数据源采集一轮。
+# 手动触发接口 /data/sources/<code>/run 与该定时任务共用 execute_crawl_with_status。
+scheduler_service.start(execute_crawl_with_status, interval_minutes=SCHEDULE_INTERVAL_MINUTES)
+
+
 if __name__ == '__main__':
-    app.run()
+    # socketio.run 兼容普通 HTTP 路由，同时提供 WebSocket 支持
+    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
