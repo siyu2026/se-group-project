@@ -109,6 +109,7 @@
   <h1>医疗疾病数据分析大屏</h1>
   <div class="meta">
     <span><span class="dot"></span>服务在线</span>
+    <span><span class="dot" id="rtDot" style="background:#64748b"></span><span id="rtStatus">实时通道连接中…</span></span>
     <span id="updateTime">--</span>
     <button class="ghost" id="refreshBtn">刷新数据</button>
   </div>
@@ -393,7 +394,7 @@ async function doPredict() {
     if (body.code !== 200) { box.textContent = '预测失败：' + (body.data && body.data.resultData || body.message); return; }
     const d = body.data;
     const cases = (d.similarCases || []).map(c =>
-      `<li>${escapeHtml(c.type)} · ${escapeHtml(c.docHospital || '')} · 相似度 ${(c.similarity * 100).toFixed(1)}%</li>`).join('');
+      `<li>${escapeHtml(c.type)} · ${escapeHtml(c.docHospital || '')}${c.similarity != null ? ' · 相似度 ' + (c.similarity * 100).toFixed(1) + '%' : ''}</li>`).join('');
     box.innerHTML = `
       <p><span class="badge">预测疾病</span><b style="color:#67e8f9">${escapeHtml(d.resultData)}</b></p>
       <p style="margin-top:6px"><span class="badge">置信度</span>${(d.confidence * 100).toFixed(1)}%</p>
@@ -437,6 +438,43 @@ function sendChat() {
   log.scrollTop = log.scrollHeight;
 }
 
+/* ---------------- 实时数据更新（WebSocket 推送） ----------------
+   后端 APScheduler 定时采集完成后，通过 /ws/updates 命名空间广播 data_updated 事件；
+   前端收到事件后精确刷新一次数据，替代传统的定时轮询。 */
+let rtSocket = null;
+let rtToastTimer = null;
+function initRealtime() {
+  if (typeof io === 'undefined') return;
+  rtSocket = io('/ws/updates', { transports: ['websocket', 'polling'] });
+  rtSocket.on('connected', () => {
+    document.getElementById('rtDot').style.background = '#22c55e';
+    document.getElementById('rtStatus').textContent = '实时更新已开启';
+  });
+  rtSocket.on('disconnect', () => {
+    document.getElementById('rtDot').style.background = '#f59e0b';
+    document.getElementById('rtStatus').textContent = '实时通道已断开';
+  });
+  rtSocket.on('connect_error', () => {
+    document.getElementById('rtDot').style.background = '#f87171';
+    document.getElementById('rtStatus').textContent = '实时通道不可用';
+  });
+  rtSocket.on('data_updated', data => {
+    // 顶部提示本次采集结果
+    const label = data.success
+      ? `定时采集：${data.disease} 新增 ${data.delta} 条`
+      : `定时采集：${data.disease} 失败`;
+    const status = document.getElementById('rtStatus');
+    status.textContent = label;
+    clearTimeout(rtToastTimer);
+    rtToastTimer = setTimeout(() => { status.textContent = '实时更新已开启'; }, 8000);
+    // 有新数据入库时刷新大屏与表格
+    if (data.success && data.delta > 0) {
+      loadHome().catch(e => console.error(e));
+      loadTable().catch(e => console.error(e));
+    }
+  });
+}
+
 /* ---------------- 事件绑定 ---------------- */
 document.getElementById('refreshBtn').addEventListener('click', () => {
   loadHome().catch(e => console.error(e));
@@ -455,6 +493,7 @@ document.getElementById('chatInput').addEventListener('keydown', e => { if (e.ke
 loadHome().catch(e => console.error('首页数据加载失败', e));
 loadTable().catch(e => console.error('表格数据加载失败', e));
 initChat();
+initRealtime();
 </script>
 </body>
 </html>
