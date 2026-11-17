@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>医疗疾病数据分析大屏</title>
+<style>
+  :root {
+    --bg: #050b1a;
+    --panel: rgba(13, 32, 62, 0.72);
+    --border: rgba(56, 189, 248, 0.28);
+    --text: #dbeafe;
+    --muted: #7f9dc4;
+    --accent: #22d3ee;
+    --accent2: #3b82f6;
+    --warn: #f59e0b;
+    --danger: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(34, 211, 238, 0.16), transparent 60%),
+      radial-gradient(1000px 500px at 90% 0%, rgba(59, 130, 246, 0.16), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 18px 22px 40px;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+    padding-bottom: 14px; margin-bottom: 16px;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.18);
+  }
+  h1 {
+    font-size: 22px; letter-spacing: 2px; font-weight: 600;
+    background: linear-gradient(90deg, #67e8f9, #60a5fa);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .meta { font-size: 12px; color: var(--muted); display: flex; gap: 18px; align-items: center; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 6px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+  .kpi {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; position: relative; overflow: hidden;
+  }
+  .kpi::after {
+    content: ""; position: absolute; left: 0; top: 0; width: 3px; height: 100%;
+    background: linear-gradient(180deg, var(--accent), var(--accent2));
+  }
+  .kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .kpi .value { font-size: 26px; font-weight: 700; color: #e0f2fe; }
+  .kpi .value small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px 8px; min-height: 300px; display: flex; flex-direction: column;
+  }
+  .panel h2 {
+    font-size: 14px; font-weight: 600; color: #bae6fd; letter-spacing: 1px;
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .panel h2::before { content: ""; width: 3px; height: 13px; background: var(--accent); border-radius: 2px; }
+  .panel .chart { flex: 1; min-height: 240px; }
+  .panel.wide { grid-column: span 2; }
+  .panel.full { grid-column: span 3; min-height: auto; }
+  .chat-box { display: flex; flex-direction: column; height: 240px; }
+  .chat-log { flex: 1; overflow-y: auto; font-size: 13px; line-height: 1.6; padding-right: 4px; }
+  .chat-log div { margin-bottom: 8px; }
+  .chat-log .me { color: #93c5fd; }
+  .chat-log .ai { color: #d1fae5; }
+  .chat-log .err { color: var(--danger); }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  input, textarea, button { font-family: inherit; font-size: 13px; }
+  input, textarea {
+    flex: 1; background: rgba(2, 12, 28, 0.85); border: 1px solid rgba(56, 189, 248, 0.25);
+    color: var(--text); border-radius: 6px; padding: 8px 10px; outline: none; resize: vertical;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  button {
+    background: linear-gradient(135deg, #0ea5e9, #2563eb); color: #fff; border: none;
+    border-radius: 6px; padding: 8px 16px; cursor: pointer; transition: opacity .2s;
+  }
+  button:hover { opacity: .85; }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: #93c5fd; }
+  .pred-form { display: flex; flex-direction: column; gap: 8px; }
+  .pred-result { margin-top: 10px; font-size: 13px; line-height: 1.7; color: #cbd5e1; max-height: 170px; overflow-y: auto; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: rgba(34, 211, 238, 0.14); color: #67e8f9; margin-right: 6px; }
+  .table-tools { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .table-wrap { overflow: auto; max-height: 380px; border: 1px solid rgba(56, 189, 248, 0.15); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid rgba(56, 189, 248, 0.1); white-space: nowrap; }
+  th { position: sticky; top: 0; background: rgba(9, 24, 48, 0.98); color: #7dd3fc; font-weight: 600; }
+  tbody tr:hover { background: rgba(34, 211, 238, 0.06); }
+  td.content { white-space: normal; min-width: 320px; color: #cbd5e1; }
+  a { color: #67e8f9; text-decoration: none; }
+  .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .loading { color: var(--muted); font-size: 12px; }
+  @media (max-width: 1200px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .grid { grid-template-columns: 1fr; }
+    .panel.wide, .panel.full { grid-column: span 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>医疗疾病数据分析大屏</h1>
+  <div class="meta">
+    <span><span class="dot"></span>服务在线</span>
+    <span id="updateTime">--</span>
+    <button class="ghost" id="refreshBtn">刷新数据</button>
+  </div>
+</header>
+
+<section class="kpis">
+  <div class="kpi"><div class="label">病例总数</div><div class="value" id="kpiTotal">--</div></div>
+  <div class="kpi"><div class="label">覆盖疾病类型</div><div class="value" id="kpiDisease">--</div></div>
+  <div class="kpi"><div class="label">病例最多的疾病</div><div class="value" id="kpiTop">--</div></div>
+  <div class="kpi"><div class="label">患者年龄区间</div><div class="value" id="kpiAge">--</div></div>
+</section>
+
+<section class="grid">
+  <div class="panel"><h2>疾病类型分布</h2><div class="chart" id="pieChart"></div></div>
+  <div class="panel"><h2>各疾病病例数</h2><div class="chart" id="barChart"></div></div>
+  <div class="panel"><h2>男女比例</h2><div class="chart" id="genderChart"></div></div>
+
+  <div class="panel"><h2>科室分布 TOP8</h2><div class="chart" id="deptChart"></div></div>
+  <div class="panel"><h2>病情描述词云</h2><div class="chart" id="wordChart"></div></div>
+  <div class="panel"><h2>各年龄段平均身高 / 体重</h2><div class="chart" id="bodyChart"></div></div>
+
+  <div class="panel"><h2>疾病预测</h2>
+    <div class="pred-form">
+      <textarea id="predInput" rows="4" placeholder="请输入症状描述，例如：最近血压偏高，早上起床头晕，是否需要调整降压药"></textarea>
+      <button id="predBtn">开始预测</button>
+    </div>
+    <div class="pred-result" id="predResult">输入症状后点击预测，结果基于库中相似病例。</div>
+  </div>
+
+  <div class="panel"><h2>AI 医疗助手</h2>
+    <div class="chat-box">
+      <div class="chat-log" id="chatLog"><div class="ai">已连接助手，请描述您的健康问题。</div></div>
+      <div class="row">
+        <input id="chatInput" placeholder="输入问题后回车发送">
+        <button id="chatSend">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel"><h2>最忙科室 / 医院</h2>
+    <div class="pred-result" id="foundBox" style="max-height:none">加载中...</div>
+  </div>
+</section>
+
+<section class="grid" style="margin-top:14px">
+  <div class="panel full">
+    <h2>病例明细</h2>
+    <div class="table-tools">
+      <input id="searchInput" placeholder="搜索疾病 / 医院 / 科室 / 症状关键词" style="max-width:340px">
+      <span class="loading" id="tableInfo"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>疾病</th><th>性别</th><th>年龄</th><th>就诊时间</th>
+            <th>病情描述</th><th>医生</th><th>医院</th><th>科室</th><th>链接</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button class="ghost" id="prevPage">上一页</button>
+      <span id="pageInfo">1 / 1</span>
+      <button class="ghost" id="nextPage">下一页</button>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+<script>
+const API = '';
+const charts = {};
+const COLORS = ['#22d3ee', '#3b82f6', '#a78bfa', '#34d399', '#f59e0b', '#f472b6', '#60a5fa', '#fbbf24'];
+const AXIS = {
+  axisLine: { lineStyle: { color: 'rgba(125,211,252,.35)' } },
+  axisLabel: { color: '#7f9dc4', fontSize: 11 },
+  splitLine: { lineStyle: { color: 'rgba(125,211,252,.08)' } }
+};
+
+let allCases = [];
+let filtered = [];
+let page = 1;
+const PAGE_SIZE = 10;
+
+function initChart(id) {
+  const el = document.getElementById(id);
+  charts[id] = echarts.init(el, null, { renderer: 'canvas' });
+  return charts[id];
+}
+
+function resizeAll() { Object.values(charts).forEach(c => c && c.resize()); }
+window.addEventListener('resize', resizeAll);
+
+async function getJSON(url) {
+  const res = await fetch(API + url);
+  if (!res.ok) throw new Error(url + ' -> ' + res.status);
+  return res.json();
+}
+
+/* ---------------- 首页大屏 ---------------- */
+async function loadHome() {
+  const [home, summary] = await Promise.all([getJSON('/getHomeData'), getJSON('/data/summary')]);
+  const d = home.data;
+  const s = summary.data;
+
+  document.getElementById('kpiTotal').innerHTML = s.totalRecords;
+  document.getElementById('kpiDisease').innerHTML = d.pieData.length + '<small>类</small>';
+  document.getElementById('kpiTop').innerHTML = d.maxType + '<small>' + d.maxNum + ' 例</small>';
+  document.getElementById('kpiAge').innerHTML = d.minAge + '-' + d.maxAge + '<small>岁</small>';
+  document.getElementById('updateTime').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
+
+  renderPie(d.pieData);
+  renderBar(d.configOne);
+  renderGender(d.ratioData);
+  renderDept(d.circleData);
+  renderWord(d.wordData);
+  renderBody(d.lastData);
+
+  document.getElementById('foundBox').innerHTML =
+    '<p><span class="badge">最忙科室</span>' + d.maxDep + '</p>' +
+    '<p style="margin-top:8px"><span class="badge">最忙医院</span>' + d.maxHos + '</p>' +
+    '<p style="margin-top:8px"><span class="badge">今日新增</span>' + s.todayUpdates + ' 条</p>' +
+    '<p style="margin-top:8px"><span class="badge">活跃数据源</span>' + s.activeSources + ' 个</p>';
+}
+
+function renderPie(data) {
+  initChart('pieChart').setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 例 ({d}%)' },
+    legend: { bottom: 0, textStyle: { color: '#7f9dc4', fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+    color: COLORS,
+    series: [{
+      type: 'pie', radius: ['42%', '66%'], center: ['50%', '45%'],
+      itemStyle: { borderColor: '#050b1a', borderWidth: 2 },
+      label: { color: '#cbd5e1', fontSize: 11, formatter: '{b}\n{d}%' },
+      labelLine: { lineStyle: { color: 'rgba(125,211,252,.4)' } },
+      data: data
+    }]
+  });
+}
+
+function renderBar(configOne) {
+  initChart('barChart').setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: 40, right: 16, top: 20, bottom: 46 },
+    xAxis: { type: 'category', data: configOne.type, ...AXIS, axisLabel: { ...AXIS.axisLabel, interval: 0, rotate: 24 } },
+    yAxis: { type: 'value', ...AXIS },
+    series: [{
+      type: 'bar', data: configOne.sum, barMaxWidth: 26,
+      itemStyle: {
+        borderRadius: [4, 4, 0, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#22d3ee' }, { offset: 1, color: 'rgba(37,99,235,.25)' }
+        ])
+      }
+    }]
+  });
+}
+
+function renderGender(data) {
+  initChart('genderChart').setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 例 ({d}%)' },
+    legend: { bottom: 0, textStyle: { color: '#7f9dc4', fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+    color: ['#3b82f6', '#f472b6'],
+    series: [{
+      type: 'pie', radius: ['48%', '70%'], center: ['50%', '45%'],
+      itemStyle: { borderColor: '#050b1a', borderWidth: 2 },
+      label: { color: '#cbd5e1', formatter: '{b} {d}%' },
+      data: data
+    }]
+  });
+}
+
+function renderDept(data) {
+  initChart('deptChart').setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 例 ({d}%)' },
+    color: COLORS,
+    series: [{
+      type: 'pie', radius: ['28%', '62%'], center: ['50%', '50%'], roseType: 'radius',
+      itemStyle: { borderColor: '#050b1a', borderWidth: 2 },
+      label: { color: '#cbd5e1', fontSize: 11, formatter: '{b}\n{c} 例' },
+      labelLine: { lineStyle: { color: 'rgba(125,211,252,.35)' } },
+      data: data
+    }]
+  });
+}
+
+function renderWord(data) {
+  initChart('wordChart').setOption({
+    tooltip: { show: true },
+    series: [{
+      type: 'wordCloud', shape: 'circle', left: 'center', top: 'center', width: '94%', height: '90%',
+      sizeRange: [12, 34], rotationRange: [-45, 45], gridSize: 8, drawOutOfBound: false,
+      textStyle: {
+        color: () => COLORS[Math.floor(Math.random() * COLORS.length)],
+        fontFamily: 'Microsoft YaHei'
+      },
+      data: data
+    }]
+  });
+}
+
+function renderBody(lastData) {
+  initChart('bodyChart').setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0, textStyle: { color: '#7f9dc4', fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
+    grid: { left: 44, right: 20, top: 34, bottom: 34 },
+    xAxis: { type: 'category', boundaryGap: false, data: lastData.xData, ...AXIS },
+    yAxis: [{ type: 'value', name: '身高cm', nameTextStyle: { color: '#7f9dc4', fontSize: 11 }, ...AXIS },
+            { type: 'value', name: '体重kg', nameTextStyle: { color: '#7f9dc4', fontSize: 11 }, ...AXIS, splitLine: { show: false } }],
+    series: [
+      { name: '平均身高', type: 'line', smooth: true, data: lastData.y1Data, symbolSize: 6,
+        itemStyle: { color: '#22d3ee' },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(34,211,238,.35)' }, { offset: 1, color: 'rgba(34,211,238,0)' }]) } },
+      { name: '平均体重', type: 'line', smooth: true, yAxisIndex: 1, data: lastData.y2Data, symbolSize: 6,
+        itemStyle: { color: '#f59e0b' } }
+    ]
+  });
+}
+
+/* ---------------- 病例表格 ---------------- */
+async function loadTable() {
+  const res = await getJSON('/tableData');
+  allCases = res.data.resultData.map((row, i) => {
+    const o = { id: res.data.ids[i] };
+    ['type', 'gender', 'age', 'time', 'content', 'docName', 'docHospital', 'department', 'detailUrl',
+     'height', 'weight', 'illDuration', 'allergy'].forEach((k, idx) => { o[k] = row[idx]; });
+    return o;
+  });
+  filtered = allCases;
+  page = 1;
+  renderTable();
+}
+
+function renderTable() {
+  const keyword = document.getElementById('searchInput').value.trim();
+  filtered = keyword
+    ? allCases.filter(c => ['type', 'docHospital', 'department', 'content', 'docName']
+        .some(k => String(c[k] || '').includes(keyword)))
+    : allCases;
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  page = Math.min(page, totalPages);
+  const start = (page - 1) * PAGE_SIZE;
+  const rows = filtered.slice(start, start + PAGE_SIZE);
+
+  document.getElementById('tableBody').innerHTML = rows.map(c => `
+    <tr>
+      <td>${c.id}</td><td>${c.type || ''}</td><td>${c.gender || ''}</td><td>${c.age || ''}</td>
+      <td>${c.time || ''}</td>
+      <td class="content" title="${escapeAttr(c.content)}">${escapeHtml(c.content || '')}</td>
+      <td>${c.docName || ''}</td><td>${c.docHospital || ''}</td><td>${c.department || ''}</td>
+      <td>${c.detailUrl ? `<a href="${escapeAttr(c.detailUrl)}" target="_blank" rel="noopener">查看</a>` : '-'}</td>
+    </tr>`).join('');
+
+  document.getElementById('tableInfo').textContent = `共 ${filtered.length} 条`;
+  document.getElementById('pageInfo').textContent = `${page} / ${totalPages}`;
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+function escapeAttr(text) { return escapeHtml(text || ''); }
+
+/* ---------------- 疾病预测 ---------------- */
+async function doPredict() {
+  const content = document.getElementById('predInput').value.trim();
+  const box = document.getElementById('predResult');
+  if (!content) { box.textContent = '请先输入症状描述'; return; }
+  box.textContent = '预测中...';
+  try {
+    const res = await fetch(API + '/submitModel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    });
+    const body = await res.json();
+    if (body.code !== 200) { box.textContent = '预测失败：' + (body.data && body.data.resultData || body.message); return; }
+    const d = body.data;
+    const cases = (d.similarCases || []).map(c =>
+      `<li>${escapeHtml(c.type)} · ${escapeHtml(c.docHospital || '')} · 相似度 ${(c.similarity * 100).toFixed(1)}%</li>`).join('');
+    box.innerHTML = `
+      <p><span class="badge">预测疾病</span><b style="color:#67e8f9">${escapeHtml(d.resultData)}</b></p>
+      <p style="margin-top:6px"><span class="badge">置信度</span>${(d.confidence * 100).toFixed(1)}%</p>
+      <p style="margin-top:6px">${escapeHtml(d.advice)}</p>
+      <p style="margin-top:8px;color:#7f9dc4">相似病例：</p>
+      <ul style="margin-left:18px">${cases || '<li>暂无</li>'}</ul>`;
+  } catch (e) {
+    box.textContent = '预测请求失败：' + e.message;
+  }
+}
+
+/* ---------------- AI 对话 ---------------- */
+let socket = null;
+function initChat() {
+  if (typeof io === 'undefined') return;
+  const log = document.getElementById('chatLog');
+  socket = io(`http://${location.hostname}:5001/ws/chat`, { transports: ['websocket', 'polling'] });
+  socket.on('connected', () => { log.innerHTML = '<div class="ai">已连接 AI 医疗助手。</div>'; });
+  socket.on('connect_error', () => {
+    log.innerHTML = '<div class="err">无法连接 AI 服务（5001 端口未启动），请先运行 python websocket_chat.py</div>';
+  });
+  socket.on('response', data => {
+    if (data.type === 'error') { log.innerHTML += `<div class="err">${escapeHtml(data.message)}</div>`; }
+    else { log.innerHTML += `<div class="ai">${escapeHtml(data.content)}</div>`; }
+    log.scrollTop = log.scrollHeight;
+  });
+}
+
+function sendChat() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  const log = document.getElementById('chatLog');
+  if (!text) return;
+  if (!socket || !socket.connected) {
+    log.innerHTML += '<div class="err">AI 服务未连接，请先启动 websocket_chat.py</div>';
+    return;
+  }
+  log.innerHTML += `<div class="me">我：${escapeHtml(text)}</div>`;
+  socket.emit('message', JSON.stringify({ content: text }));
+  input.value = '';
+  log.scrollTop = log.scrollHeight;
+}
+
+/* ---------------- 事件绑定 ---------------- */
+document.getElementById('refreshBtn').addEventListener('click', () => {
+  loadHome().catch(e => console.error(e));
+  loadTable().catch(e => console.error(e));
+});
+document.getElementById('predBtn').addEventListener('click', doPredict);
+document.getElementById('searchInput').addEventListener('input', () => { page = 1; renderTable(); });
+document.getElementById('prevPage').addEventListener('click', () => { if (page > 1) { page--; renderTable(); } });
+document.getElementById('nextPage').addEventListener('click', () => {
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  if (page < totalPages) { page++; renderTable(); }
+});
+document.getElementById('chatSend').addEventListener('click', sendChat);
+document.getElementById('chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+
+loadHome().catch(e => console.error('首页数据加载失败', e));
+loadTable().catch(e => console.error('表格数据加载失败', e));
+initChat();
+</script>
+</body>
+</html>
