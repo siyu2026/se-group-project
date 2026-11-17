@@ -1,22 +1,22 @@
-"""爬虫调度模块。
+"""病例采集服务（单例模式），由 spiders/crawler_scheduler.py 迁入并重构。
 
-app.py 通过 `from crawler_scheduler import crawler_scheduler, disease_types` 使用本模块。
+【设计模式说明 —— 单例模式（Singleton）】
+CrawlerService 使用 SingletonMeta 元类，进程内全局唯一：
+    - 数据源清单（由 DataSourceFactory 创建）只需扫描一次；
+    - 手动触发（HTTP 接口）与定时触发（APScheduler）共享同一实例，
+      保证「采集中去重」「状态一致」。
 
-说明：原始版本使用 selenium 实时抓取好大夫在线，依赖外网且容易被反爬阻断。
-这里改为「本地数据源增量导入」：从项目根目录的 temp2.csv 以及
-spiders/data_source/*.csv 读取病例，按 detailUrl 去重后写入 MySQL。
-接口保持不变（crawl_disease 返回 bool），后续要接真实爬虫时替换 _fetch_rows 即可。
+【工厂模式的使用点】
+本类不直接创建 CsvDataSource，而是向 DataSourceFactory 索要数据源实例，
+因此数据源类型扩展时本类无需修改。
+
+接口保持与原 CrawlerScheduler 一致：crawl_disease(disease, pages) -> bool，
+app.py 的手动触发接口与定时任务都走这里。
 """
 
-import csv
-import glob
-import os
-from pathlib import Path
-
 from utils.db_config import get_db_connection
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_SOURCE_DIR = Path(__file__).resolve().parent / 'data_source'
+from service.base import SingletonMeta
+from service.data_source import CSV_FIELDS, DataSourceFactory
 
 # 数据库不可用时使用的兜底疾病列表，与 medicalinfo.sql 内置数据保持一致
 DEFAULT_DISEASE_TYPES = ['高血压', '感冒', '腰椎间盘突出', '骨折', '颈椎病', '胃炎', '抑郁症']
@@ -26,11 +26,6 @@ INSERT_SQL = (
     'department, detailUrl, height, weight, illDuration, allergy) '
     'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
 )
-
-CSV_FIELDS = [
-    'type', 'gender', 'age', 'time', 'content', 'docName', 'docHospital',
-    'department', 'detailUrl', 'height', 'weight', 'illDuration', 'allergy',
-]
 
 
 def _load_disease_types():
@@ -55,36 +50,22 @@ def _load_disease_types():
 disease_types = _load_disease_types()
 
 
-class CrawlerScheduler:
-    """按疾病执行采集任务，并把新病例写入 cases 表。"""
+class CrawlerService(metaclass=SingletonMeta):
+    """按疾病执行采集任务，并把新病例写入 cases 表（单例）。"""
 
     def __init__(self):
-        self.data_source_files = self._discover_files()
-
-    @staticmethod
-    def _discover_files():
-        files = []
-        csv_default = BASE_DIR / 'temp2.csv'
-        if csv_default.exists():
-            files.append(csv_default)
-        files.extend(Path(p) for p in glob.glob(str(DATA_SOURCE_DIR / '*.csv')))
-        return files
+        # 【工厂模式】通过工厂创建数据源实例，而非自行 new 具体类
+        self.data_sources = DataSourceFactory.discover_default_sources()
 
     def _fetch_rows(self, disease):
-        """从本地 CSV 数据源读取指定疾病的病例行。"""
+        """遍历所有数据源，收集指定疾病的病例行。"""
         rows = []
-        for path in self.data_source_files:
-            try:
-                with open(path, 'r', encoding='utf-8-sig', newline='') as f:
-                    for item in csv.DictReader(f):
-                        if (item.get('type') or '').strip() != disease:
-                            continue
-                        rows.append(tuple((item.get(field) or '').strip() or None for field in CSV_FIELDS))
-            except Exception as e:
-                print('[Crawler] 读取数据源 {} 失败：{}'.format(path, e))
+        for source in self.data_sources:
+            rows.extend(source.fetch(disease))
         return rows
 
-    def _existing_keys(self, cursor, disease):
+    @staticmethod
+    def _existing_keys(cursor, disease):
         cursor.execute(
             'SELECT detailUrl FROM cases WHERE type=%s AND detailUrl IS NOT NULL AND detailUrl <> ""',
             (disease,)
@@ -94,7 +75,7 @@ class CrawlerScheduler:
     def crawl_disease(self, disease, pages=3):
         """采集指定疾病的新病例。
 
-        pages 参数保留以兼容 app.py 的调用，本地数据源模式下不生效。
+        pages 参数保留以兼容历史调用，本地数据源模式下不生效。
         返回 True 表示任务执行完成（新增条数可能为 0）。
         """
         rows = self._fetch_rows(disease)
@@ -108,6 +89,7 @@ class CrawlerScheduler:
             cursor = conn.cursor()
             existing = self._existing_keys(cursor, disease)
 
+            # 增量导入：按 detailUrl 去重，已存在的链接跳过
             new_rows = []
             for row in rows:
                 detail_url = row[CSV_FIELDS.index('detailUrl')]
@@ -132,4 +114,5 @@ class CrawlerScheduler:
                 conn.close()
 
 
-crawler_scheduler = CrawlerScheduler()
+# 模块级单例实例，保持与原 crawler_scheduler 相同的使用方式
+crawler_service = CrawlerService()
