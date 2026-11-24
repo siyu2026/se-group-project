@@ -65,7 +65,7 @@
   .panel .chart { flex: 1; min-height: 240px; }
   .panel.wide { grid-column: span 2; }
   .panel.full { grid-column: span 3; min-height: auto; }
-  .chat-box { display: flex; flex-direction: column; height: 240px; }
+  .chat-box { display: flex; flex-direction: column; height: 300px; }
   .chat-log { flex: 1; overflow-y: auto; font-size: 13px; line-height: 1.6; padding-right: 4px; }
   .chat-log div { margin-bottom: 8px; }
   .chat-log .me { color: #93c5fd; }
@@ -97,6 +97,25 @@
   a { color: #67e8f9; text-decoration: none; }
   .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; font-size: 12px; color: var(--muted); }
   .loading { color: var(--muted); font-size: 12px; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .page-alert {
+    display: none; align-items: center; justify-content: space-between; gap: 12px;
+    background: rgba(248, 113, 113, .12); border: 1px solid rgba(248, 113, 113, .45);
+    color: #fecaca; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px;
+  }
+  .page-alert button { padding: 5px 12px; }
+  .panel-msg { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 200px; color: var(--muted); font-size: 13px; }
+  td.empty { text-align: center; color: var(--muted); padding: 24px 0; }
+  .err-text { color: var(--danger); }
+  .status-line { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; display: inline-block; }
+  .status-dot.on { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, .8); }
+  .chat-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .chat-toolbar button { padding: 3px 10px; font-size: 12px; }
+  .chat-log div { white-space: pre-wrap; word-break: break-word; }
+  .chat-log .info { color: #7dd3fc; }
+  .chat-log .thinking { color: var(--muted); font-style: italic; }
+  .chat-hint { font-size: 11px; line-height: 1.5; color: var(--muted); margin-top: 6px; }
   @media (max-width: 1200px) {
     .kpis { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
@@ -114,6 +133,8 @@
     <button class="ghost" id="refreshBtn">刷新数据</button>
   </div>
 </header>
+
+<div class="page-alert" id="pageAlert"></div>
 
 <section class="kpis">
   <div class="kpi"><div class="label">病例总数</div><div class="value" id="kpiTotal">--</div></div>
@@ -141,11 +162,16 @@
 
   <div class="panel"><h2>AI 医疗助手</h2>
     <div class="chat-box">
-      <div class="chat-log" id="chatLog"><div class="ai">已连接助手，请描述您的健康问题。</div></div>
+      <div class="chat-toolbar">
+        <span class="status-line"><span class="status-dot" id="chatDot"></span><span id="chatStatus">正在连接…</span></span>
+        <button class="ghost" id="chatClear" title="清除当前连接内的对话上下文">清除上下文</button>
+      </div>
+      <div class="chat-log" id="chatLog"><div class="ai">正在连接 AI 医疗助手…</div></div>
       <div class="row">
-        <input id="chatInput" placeholder="输入问题后回车发送">
+        <input id="chatInput" maxlength="500" placeholder="输入问题后回车发送">
         <button id="chatSend">发送</button>
       </div>
+      <div class="chat-hint">回答由外部 AI 生成，仅供参考，不能替代医生诊断；如遇胸痛、呼吸困难、意识不清等紧急情况，请立即就医或拨打 120。</div>
     </div>
   </div>
 
@@ -213,30 +239,80 @@ async function getJSON(url) {
   return res.json();
 }
 
+/* ---------------- 通用状态提示 ---------------- */
+function showAlert(title, detail, retryFn) {
+  const box = document.getElementById('pageAlert');
+  box.innerHTML = `<div><b>${escapeHtml(title)}</b>${detail ? '：' + escapeHtml(detail) : ''}</div>
+    <button class="ghost" id="alertRetry">重试</button>`;
+  box.style.display = 'flex';
+  document.getElementById('alertRetry').onclick = () => { hideAlert(); if (retryFn) retryFn(); };
+}
+
+function hideAlert() {
+  const box = document.getElementById('pageAlert');
+  box.style.display = 'none';
+  box.innerHTML = '';
+}
+
+function setPanelMessage(id, text) {
+  if (charts[id]) { charts[id].dispose(); delete charts[id]; }
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = `<div class="panel-msg"><div>${escapeHtml(text)}</div></div>`;
+}
+
+function resetKpis() {
+  ['kpiTotal', 'kpiDisease', 'kpiTop', 'kpiAge'].forEach(id => { document.getElementById(id).textContent = '--'; });
+}
+
+const CHART_IDS = ['pieChart', 'barChart', 'genderChart', 'deptChart', 'wordChart', 'bodyChart'];
+
 /* ---------------- 首页大屏 ---------------- */
 async function loadHome() {
-  const [home, summary] = await Promise.all([getJSON('/getHomeData'), getJSON('/data/summary')]);
-  const d = home.data;
-  const s = summary.data;
+  try {
+    const [home, summary] = await Promise.all([getJSON('/getHomeData'), getJSON('/data/summary')]);
+    if (!home || home.code !== 200 || !home.data) throw new Error((home && home.message) || '统计接口返回异常');
+    if (!summary || summary.code !== 200 || !summary.data) throw new Error((summary && summary.message) || '摘要接口返回异常');
 
-  document.getElementById('kpiTotal').innerHTML = s.totalRecords;
-  document.getElementById('kpiDisease').innerHTML = d.pieData.length + '<small>类</small>';
-  document.getElementById('kpiTop').innerHTML = d.maxType + '<small>' + d.maxNum + ' 例</small>';
-  document.getElementById('kpiAge').innerHTML = d.minAge + '-' + d.maxAge + '<small>岁</small>';
-  document.getElementById('updateTime').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
+    const d = home.data;
+    const s = summary.data;
+    const pie = d.pieData || [];
 
-  renderPie(d.pieData);
-  renderBar(d.configOne);
-  renderGender(d.ratioData);
-  renderDept(d.circleData);
-  renderWord(d.wordData);
-  renderBody(d.lastData);
+    document.getElementById('kpiTotal').innerHTML = s.totalRecords;
+    document.getElementById('kpiDisease').innerHTML = pie.length + '<small>类</small>';
+    document.getElementById('kpiTop').innerHTML = d.maxType + '<small>' + d.maxNum + ' 例</small>';
+    document.getElementById('kpiAge').innerHTML = d.minAge + '-' + d.maxAge + '<small>岁</small>';
+    document.getElementById('updateTime').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
 
-  document.getElementById('foundBox').innerHTML =
-    '<p><span class="badge">最忙科室</span>' + d.maxDep + '</p>' +
-    '<p style="margin-top:8px"><span class="badge">最忙医院</span>' + d.maxHos + '</p>' +
-    '<p style="margin-top:8px"><span class="badge">今日新增</span>' + s.todayUpdates + ' 条</p>' +
-    '<p style="margin-top:8px"><span class="badge">活跃数据源</span>' + s.activeSources + ' 个</p>';
+    if (!pie.length) {
+      CHART_IDS.forEach(id => setPanelMessage(id, '暂无病例数据'));
+    } else {
+      CHART_IDS.forEach(id => {
+        if (charts[id]) { charts[id].dispose(); delete charts[id]; }
+        document.getElementById(id).innerHTML = '';
+      });
+      renderPie(pie);
+      renderBar(d.configOne);
+      renderGender(d.ratioData);
+      renderDept(d.circleData);
+      renderWord(d.wordData);
+      renderBody(d.lastData);
+    }
+
+    document.getElementById('foundBox').innerHTML =
+      '<p><span class="badge">最忙科室</span>' + d.maxDep + '</p>' +
+      '<p style="margin-top:8px"><span class="badge">最忙医院</span>' + d.maxHos + '</p>' +
+      '<p style="margin-top:8px"><span class="badge">今日新增</span>' + s.todayUpdates + ' 条</p>' +
+      '<p style="margin-top:8px"><span class="badge">活跃数据源</span>' + s.activeSources + ' 个</p>';
+
+    hideAlert();
+  } catch (e) {
+    resetKpis();
+    CHART_IDS.forEach(id => setPanelMessage(id, '数据加载失败'));
+    document.getElementById('foundBox').innerHTML = '<span class="err-text">数据加载失败</span>';
+    document.getElementById('updateTime').textContent = '更新失败';
+    showAlert('看板数据加载失败', '服务不可用，请确认 app.py 与 MySQL 已启动', loadHome);
+    console.error('首页数据加载失败', e);
+  }
 }
 
 function renderPie(data) {
@@ -336,16 +412,31 @@ function renderBody(lastData) {
 
 /* ---------------- 病例表格 ---------------- */
 async function loadTable() {
-  const res = await getJSON('/tableData');
-  allCases = res.data.resultData.map((row, i) => {
-    const o = { id: res.data.ids[i] };
-    ['type', 'gender', 'age', 'time', 'content', 'docName', 'docHospital', 'department', 'detailUrl',
-     'height', 'weight', 'illDuration', 'allergy'].forEach((k, idx) => { o[k] = row[idx]; });
-    return o;
-  });
-  filtered = allCases;
-  page = 1;
-  renderTable();
+  const tbody = document.getElementById('tableBody');
+  try {
+    const res = await getJSON('/tableData');
+    if (!res || res.code !== 200 || !res.data || !res.data.resultData) {
+      throw new Error((res && res.message) || '病例接口返回异常');
+    }
+    allCases = res.data.resultData.map((row, i) => {
+      const o = { id: res.data.ids[i] };
+      ['type', 'gender', 'age', 'time', 'content', 'docName', 'docHospital', 'department', 'detailUrl',
+       'height', 'weight', 'illDuration', 'allergy'].forEach((k, idx) => { o[k] = row[idx]; });
+      return o;
+    });
+    filtered = allCases;
+    page = 1;
+    renderTable();
+  } catch (e) {
+    allCases = [];
+    filtered = [];
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">病例数据加载失败：服务不可用</td></tr>';
+    document.getElementById('tableInfo').textContent = '加载失败';
+    document.getElementById('pageInfo').textContent = '- / -';
+    document.getElementById('prevPage').disabled = true;
+    document.getElementById('nextPage').disabled = true;
+    console.error('表格数据加载失败', e);
+  }
 }
 
 function renderTable() {
@@ -360,17 +451,22 @@ function renderTable() {
   const start = (page - 1) * PAGE_SIZE;
   const rows = filtered.slice(start, start + PAGE_SIZE);
 
-  document.getElementById('tableBody').innerHTML = rows.map(c => `
+  document.getElementById('tableBody').innerHTML = rows.length ? rows.map(c => `
     <tr>
       <td>${c.id}</td><td>${c.type || ''}</td><td>${c.gender || ''}</td><td>${c.age || ''}</td>
       <td>${c.time || ''}</td>
       <td class="content" title="${escapeAttr(c.content)}">${escapeHtml(c.content || '')}</td>
       <td>${c.docName || ''}</td><td>${c.docHospital || ''}</td><td>${c.department || ''}</td>
       <td>${c.detailUrl ? `<a href="${escapeAttr(c.detailUrl)}" target="_blank" rel="noopener">查看</a>` : '-'}</td>
-    </tr>`).join('');
+    </tr>`).join('') :
+    `<tr><td colspan="10" class="empty">${allCases.length ? '无匹配记录，请更换关键词' : '暂无病例数据'}</td></tr>`;
 
-  document.getElementById('tableInfo').textContent = `共 ${filtered.length} 条`;
+  document.getElementById('tableInfo').textContent = keyword
+    ? `匹配 ${filtered.length} 条 / 共 ${allCases.length} 条`
+    : `共 ${filtered.length} 条`;
   document.getElementById('pageInfo').textContent = `${page} / ${totalPages}`;
+  document.getElementById('prevPage').disabled = page <= 1;
+  document.getElementById('nextPage').disabled = page >= totalPages;
 }
 
 function escapeHtml(text) {
@@ -391,16 +487,23 @@ async function doPredict() {
       body: JSON.stringify({ content })
     });
     const body = await res.json();
-    if (body.code !== 200) { box.textContent = '预测失败：' + (body.data && body.data.resultData || body.message); return; }
+    if (body.code !== 200) {
+      box.innerHTML = `<p class="err-text">预测失败：${escapeHtml(body.data && body.data.resultData || body.message || '未知错误')}</p>
+        <p style="margin-top:8px;color:#7f9dc4">请稍后重试，或检查预测服务是否已加载。</p>`;
+      return;
+    }
     const d = body.data;
     const cases = (d.similarCases || []).map(c =>
       `<li>${escapeHtml(c.type)} · ${escapeHtml(c.docHospital || '')}${c.similarity != null ? ' · 相似度 ' + (c.similarity * 100).toFixed(1) + '%' : ''}</li>`).join('');
+    const conf = typeof d.confidence === 'number' ? (d.confidence * 100).toFixed(1) + '%' : '--';
     box.innerHTML = `
       <p><span class="badge">预测疾病</span><b style="color:#67e8f9">${escapeHtml(d.resultData)}</b></p>
-      <p style="margin-top:6px"><span class="badge">置信度</span>${(d.confidence * 100).toFixed(1)}%</p>
-      <p style="margin-top:6px">${escapeHtml(d.advice)}</p>
+      <p style="margin-top:6px"><span class="badge">置信度</span>${conf}</p>
+      <p style="margin-top:6px">${escapeHtml(d.advice || '')}</p>
       <p style="margin-top:8px;color:#7f9dc4">相似病例：</p>
-      <ul style="margin-left:18px">${cases || '<li>暂无</li>'}</ul>`;
+      <ul style="margin-left:18px">${cases || '<li>暂无</li>'}</ul>
+      <p style="margin-top:10px;padding-top:8px;border-top:1px dashed rgba(56,189,248,.2);color:#7f9dc4;font-size:12px">
+        以上结果由算法基于库中相似病例生成，仅供辅助参考，不能替代医生诊断；如有不适请及时就医。</p>`;
   } catch (e) {
     box.textContent = '预测请求失败：' + e.message;
   }
@@ -408,34 +511,104 @@ async function doPredict() {
 
 /* ---------------- AI 对话 ---------------- */
 let socket = null;
-function initChat() {
-  if (typeof io === 'undefined') return;
+let aiBusy = false;
+let thinkingEl = null;
+
+function setChatStatus(online, text) {
+  const dot = document.getElementById('chatDot');
+  if (dot) dot.classList.toggle('on', !!online);
+  const label = document.getElementById('chatStatus');
+  if (label) label.textContent = text;
+  document.getElementById('chatSend').disabled = !online || aiBusy;
+  document.getElementById('chatClear').disabled = !online || aiBusy;
+}
+
+function appendChat(cls, text) {
   const log = document.getElementById('chatLog');
-  socket = io(`http://${location.hostname}:5001/ws/chat`, { transports: ['websocket', 'polling'] });
-  socket.on('connected', () => { log.innerHTML = '<div class="ai">已连接 AI 医疗助手。</div>'; });
-  socket.on('connect_error', () => {
-    log.innerHTML = '<div class="err">无法连接 AI 服务（5001 端口未启动），请先运行 python websocket_chat.py</div>';
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return div;
+}
+
+function setBusy(busy) {
+  aiBusy = busy;
+  const online = socket && socket.connected;
+  document.getElementById('chatSend').disabled = busy || !online;
+  document.getElementById('chatClear').disabled = busy || !online;
+  if (busy) {
+    thinkingEl = appendChat('thinking', '正在思考…');
+  } else if (thinkingEl) {
+    thinkingEl.remove();
+    thinkingEl = null;
+  }
+}
+
+function initChat() {
+  const log = document.getElementById('chatLog');
+  if (typeof io === 'undefined') {
+    setChatStatus(false, 'AI 组件加载失败（CDN 未加载）');
+    log.innerHTML = '<div class="err">聊天组件未能加载，请检查网络后刷新页面。</div>';
+    return;
+  }
+  log.innerHTML = '';
+  socket = io(`http://${location.hostname}:5001/ws/chat`, {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 2000,
+    reconnectionAttempts: Infinity
   });
+  setChatStatus(false, '正在连接…');
+
+  socket.on('connect', () => setChatStatus(true, '已连接'));
+  socket.on('connected', () => {
+    setChatStatus(true, '已连接');
+    if (!log.childElementCount) appendChat('ai', '已连接 AI 医疗助手，请描述您的健康问题。');
+  });
+  socket.on('disconnect', () => {
+    setBusy(false);
+    setChatStatus(false, '连接已断开，正在重连…');
+  });
+  socket.on('connect_error', () => setChatStatus(false, '无法连接 AI 服务（5001 未启动）'));
   socket.on('response', data => {
-    if (data.type === 'error') { log.innerHTML += `<div class="err">${escapeHtml(data.message)}</div>`; }
-    else { log.innerHTML += `<div class="ai">${escapeHtml(data.content)}</div>`; }
-    log.scrollTop = log.scrollHeight;
+    setBusy(false);
+    if (!data || typeof data !== 'object') { appendChat('err', '收到无法识别的回复'); return; }
+    if (data.type === 'error') {
+      appendChat('err', data.message || 'AI 服务异常，请稍后重试');
+    } else if (data.type === 'info') {
+      log.innerHTML = '';
+      appendChat('info', data.message || '会话上下文已清除');
+    } else {
+      appendChat('ai', data.content || '（空回复）');
+    }
   });
 }
 
 function sendChat() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
-  const log = document.getElementById('chatLog');
-  if (!text) return;
+  if (!text) { appendChat('err', '请先输入问题'); input.focus(); return; }
+  if (aiBusy) return;
   if (!socket || !socket.connected) {
-    log.innerHTML += '<div class="err">AI 服务未连接，请先启动 websocket_chat.py</div>';
+    appendChat('err', 'AI 服务未连接，请先运行 websocket_chat.py');
     return;
   }
-  log.innerHTML += `<div class="me">我：${escapeHtml(text)}</div>`;
-  socket.emit('message', JSON.stringify({ content: text }));
+  appendChat('me', '我：' + text);
   input.value = '';
-  log.scrollTop = log.scrollHeight;
+  setBusy(true);
+  socket.emit('message', JSON.stringify({ content: text }));
+}
+
+function clearChat() {
+  if (!socket || !socket.connected) {
+    appendChat('err', 'AI 服务未连接，无法清除上下文');
+    return;
+  }
+  if (aiBusy) return;
+  appendChat('info', '正在清除当前会话上下文…');
+  socket.emit('clear_history');
 }
 
 /* ---------------- 实时数据更新（WebSocket 推送） ----------------
@@ -476,22 +649,35 @@ function initRealtime() {
 }
 
 /* ---------------- 事件绑定 ---------------- */
-document.getElementById('refreshBtn').addEventListener('click', () => {
-  loadHome().catch(e => console.error(e));
-  loadTable().catch(e => console.error(e));
+const refreshBtn = document.getElementById('refreshBtn');
+refreshBtn.addEventListener('click', async () => {
+  refreshBtn.disabled = true;
+  refreshBtn.textContent = '刷新中…';
+  try {
+    await Promise.all([loadHome(), loadTable()]);
+  } finally {
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = '刷新数据';
+  }
 });
 document.getElementById('predBtn').addEventListener('click', doPredict);
-document.getElementById('searchInput').addEventListener('input', () => { page = 1; renderTable(); });
+
+let searchTimer = null;
+document.getElementById('searchInput').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { page = 1; renderTable(); }, 300);
+});
 document.getElementById('prevPage').addEventListener('click', () => { if (page > 1) { page--; renderTable(); } });
 document.getElementById('nextPage').addEventListener('click', () => {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   if (page < totalPages) { page++; renderTable(); }
 });
 document.getElementById('chatSend').addEventListener('click', sendChat);
+document.getElementById('chatClear').addEventListener('click', clearChat);
 document.getElementById('chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
 
-loadHome().catch(e => console.error('首页数据加载失败', e));
-loadTable().catch(e => console.error('表格数据加载失败', e));
+loadHome();
+loadTable();
 initChat();
 initRealtime();
 </script>
