@@ -21,9 +21,11 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 CORS(app, origins="*")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# DeepSeek API配置
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', 'your-deepseek-api-key-here')
+# DeepSeek API配置（密钥请放在 .env 中，切勿硬编码进版本库）
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+if not DEEPSEEK_API_KEY:
+    logger.warning("未找到 DEEPSEEK_API_KEY（请在 .env 中配置），AI 对话功能暂时不可用")
 
 # 初始化DeepSeek客户端
 client = OpenAI(
@@ -132,7 +134,7 @@ def handle_message(data):
             logger.error(f"DeepSeek API error: {str(api_error)}")
             emit('response', {
                 'type': 'error',
-                'message': f'AI服务暂时不可用，请稍后重试。错误：{str(api_error)}'
+                'message': 'AI 服务暂时不可用，请稍后重试；紧急情况请立即就医。'
             })
             
     except Exception as e:
