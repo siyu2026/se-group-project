@@ -851,6 +851,11 @@ def import_cases():
             }), 400
 
         df = df.where(pd.notnull(df), None)
+        # 跳过 Excel 在 CSV 末尾自动带的全空行（整行所有列都是 None），
+        # 保留只有部分必填字段缺失的行（那样才是真正需要报错提醒用户的）
+        df = df.dropna(how='all')
+        if df.empty:
+            return jsonify({'message': 'error', 'code': 400, 'data': {'error': '文件中没有任何有效数据行'}}), 400
 
         invalid_rows = []
         for idx, row in df.iterrows():
