@@ -822,7 +822,21 @@ def import_cases():
 
     try:
         if ext == '.csv':
-            df = pd.read_csv(file)
+            # 兼容 Excel 在中文 Windows 下默认保存为 GBK 的 CSV：
+            # 依次尝试 utf-8-sig（含 BOM）/ gbk / gb18030，避免 'utf-8' 解码失败
+            raw = file.read()
+            df = None
+            last_err = None
+            for enc in ('utf-8-sig', 'gbk', 'gb18030'):
+                try:
+                    df = pd.read_csv(io.BytesIO(raw), encoding=enc)
+                    break
+                except UnicodeDecodeError as e:
+                    last_err = e
+                    continue
+            if df is None:
+                return jsonify({'message': 'error', 'code': 400,
+                                'data': {'error': f'CSV 文件编码无法识别（{last_err}），请另存为 UTF-8 或 GBK 编码后重试'}}), 400
         elif ext in ('.xls', '.xlsx'):
             df = pd.read_excel(file, engine='openpyxl')
         else:
@@ -837,6 +851,11 @@ def import_cases():
             }), 400
 
         df = df.where(pd.notnull(df), None)
+        # 跳过 Excel 在 CSV 末尾自动带的全空行（整行所有列都是 None），
+        # 保留只有部分必填字段缺失的行（那样才是真正需要报错提醒用户的）
+        df = df.dropna(how='all')
+        if df.empty:
+            return jsonify({'message': 'error', 'code': 400, 'data': {'error': '文件中没有任何有效数据行'}}), 400
 
         invalid_rows = []
         for idx, row in df.iterrows():
