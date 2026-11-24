@@ -1,9 +1,9 @@
 """疾病预测服务（策略模式 + 单例模式），由 machine/tree.py 迁入并重构。
 
 【设计模式说明 —— 策略模式（Strategy）】
-定义一族算法（关键词规则打分 / TF-IDF 相似病例加权），
+定义一族算法（关键词规则打分 / TF-IDF 相似病例加权 / MLP 神经网络分类），
 分别封装成实现同一 PredictionStrategy 接口的类，
-运行期通过 PredictionService.set_strategy('keyword' | 'tfidf') 切换，
+运行期通过 PredictionService.set_strategy('mlp' | 'tfidf' | 'keyword') 切换，
 切换过程对调用方（app.py 路由）完全透明。
 
 解决的问题：原 MedicalAI 把算法写死在类内部，换算法必须改源码；
@@ -27,6 +27,7 @@ from abc import ABC, abstractmethod
 import jieba
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.neural_network import MLPClassifier
 
 from service.base import SingletonMeta
 from utils.getPublicData import getSqlData, safe_int
@@ -56,6 +57,20 @@ DISEASE_ADVICE = {
 DEFAULT_ADVICE = '以上判断基于既往相似病例，仅供参考，不能替代医生面诊；建议携带相关检查报告到对应科室进一步确诊。'
 
 SIMILAR_CASE_LIMIT = 5
+
+# MLP 神经网络超参数（B 任务：神经网络分类算法）
+MLP_PARAMS = dict(
+    hidden_layer_sizes=(128, 64),
+    activation='relu',
+    solver='adam',
+    alpha=1e-4,
+    batch_size=32,
+    learning_rate_init=1e-3,
+    max_iter=300,
+    early_stopping=True,
+    validation_fraction=0.15,
+    random_state=42,
+)
 
 
 def _tokenize(text):
@@ -192,6 +207,70 @@ class TfidfSimilarityStrategy(PredictionStrategy):
         return _build_result(disease, confidence, similar_cases)
 
 
+class MLPNeuralStrategy(PredictionStrategy):
+    """策略三：MLP 多层感知机神经网络分类（B 任务核心算法）。
+
+    原理：
+        1. 全量病例（疾病类型 + 症状文本）经 jieba 分词后做 TF-IDF 向量化，
+           得到稠密特征矩阵；
+        2. 以疾病类型为标签训练 sklearn 的 MLPClassifier（隐藏层 128-64，
+           ReLU 激活，Adam 优化，早停防止过拟合）；
+        3. 预测时取 predict_proba 的最大值作为置信度；
+        4. 相似病例仍用 TF-IDF 余弦相似度检索（检索与分类解耦）。
+    优点：具备非线性拟合能力，能自动学习症状组合模式；
+    缺点：训练有一定耗时，样本量小时可解释性弱于规则策略。
+    """
+
+    name = 'mlp'
+    description = 'MLP 神经网络分类（128-64 隐藏层，自动学习症状模式）'
+
+    def __init__(self):
+        self._cases = []
+        self._vectorizer = None
+        self._matrix = None
+        self._mlp = None
+        self._train_accuracy = 0.0
+
+    def load(self, cases):
+        self._cases = cases
+        corpus = [_tokenize('{} {}'.format(case['type'], case['content'])) for case in cases]
+
+        # TF-IDF 特征矩阵（同时用于神经网络输入与相似病例检索）
+        self._vectorizer = TfidfVectorizer(token_pattern=r'(?u)\b\w+\b')
+        self._matrix = self._vectorizer.fit_transform(corpus)
+
+        # 训练神经网络（MLPClassifier 需要稠密矩阵）
+        X = self._matrix.toarray()
+        y = [case['type'] for case in cases]
+        self._mlp = MLPClassifier(**MLP_PARAMS)
+        self._mlp.fit(X, y)
+        self._train_accuracy = float(self._mlp.score(X, y))
+        print(
+            '[Prediction][MLP] 神经网络训练完成 (隐藏层 {}, 训练集准确率 {:.2%})'.format(
+                MLP_PARAMS['hidden_layer_sizes'], self._train_accuracy
+            )
+        )
+
+    def predict(self, text):
+        vector = self._vectorizer.transform([_tokenize(text)])
+
+        # 1) 神经网络分类
+        X_query = vector.toarray()
+        disease = self._mlp.predict(X_query)[0]
+        proba = self._mlp.predict_proba(X_query)[0]
+        confidence = round(float(max(proba)), 4)
+
+        # 2) 相似病例检索（TF-IDF 余弦相似度）
+        similarities = cosine_similarity(vector, self._matrix)[0]
+        top_indexes = similarities.argsort()[::-1][:SIMILAR_CASE_LIMIT]
+        similar_cases = [
+            dict(self._cases[idx], similarity=round(float(similarities[idx]), 4))
+            for idx in top_indexes
+        ]
+
+        return _build_result(disease, confidence, similar_cases)
+
+
 # ---------------------------------------------------------------- 预测服务
 class PredictionService(metaclass=SingletonMeta):
     """预测服务单例：持有策略注册表与当前策略，委托具体算法完成预测。
@@ -202,14 +281,14 @@ class PredictionService(metaclass=SingletonMeta):
 
     def __init__(self):
         self._strategies = self._build_strategies()
-        self._strategy = self._strategies['tfidf']   # 默认策略
+        self._strategy = self._strategies['mlp']   # 默认策略：神经网络分类（B 任务）
         self._ready = False
         self._lock = threading.Lock()
 
     @staticmethod
     def _build_strategies():
         """策略注册表：新增算法时在此注册一行即可。"""
-        strategies = [TfidfSimilarityStrategy(), KeywordRuleStrategy()]
+        strategies = [MLPNeuralStrategy(), TfidfSimilarityStrategy(), KeywordRuleStrategy()]
         return {s.name: s for s in strategies}
 
     # ------------------------------------------------------------ 策略管理
