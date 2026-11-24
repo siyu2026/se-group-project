@@ -66,7 +66,22 @@ class SchedulerService(metaclass=SingletonMeta):
             self.last_run_at = datetime.now()
             results = []
             print('[Scheduler] 定时采集开始 @ {}'.format(self.last_run_at.strftime('%Y-%m-%d %H:%M:%S')))
-            for code in self._enabled_source_codes():
+            try:
+                source_codes = self._enabled_source_codes()
+            except Exception as e:
+                result = {'code': None, 'disease': None, 'delta': 0,
+                          'success': False, 'error': str(e)}
+                results.append(result)
+                self._notify(result)
+                self.last_results = results
+                print('[Scheduler] 定时采集无法开始：{}'.format(e))
+                return results
+            if not source_codes:
+                result = {'code': None, 'disease': None, 'delta': 0,
+                          'success': False, 'error': '没有启用的数据源'}
+                results.append(result)
+                self._notify(result)
+            for code in source_codes:
                 try:
                     result = crawl_executor(code, trigger='schedule')
                 except Exception as e:
@@ -91,8 +106,7 @@ class SchedulerService(metaclass=SingletonMeta):
                 cursor.execute('SELECT code FROM data_sources WHERE enabled=1')
                 return [row[0] for row in cursor.fetchall()]
         except Exception as e:
-            print('[Scheduler] 读取启用数据源失败：{}'.format(e))
-            return []
+            raise RuntimeError('读取启用数据源失败：{}'.format(e)) from e
         finally:
             if conn:
                 conn.close()

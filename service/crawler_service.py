@@ -60,6 +60,8 @@ class CrawlerService(metaclass=SingletonMeta):
     def _fetch_rows(self, disease):
         """遍历所有数据源，收集指定疾病的病例行。"""
         rows = []
+        # 网页采集器可能刚刚创建输出 CSV；每轮刷新清单可立即读到新文件。
+        self.data_sources = DataSourceFactory.discover_default_sources()
         for source in self.data_sources:
             rows.extend(source.fetch(disease))
         return rows
