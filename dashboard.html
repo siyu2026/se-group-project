@@ -120,7 +120,58 @@
     .kpis { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
     .panel.wide, .panel.full { grid-column: span 1; }
+    .admin-grid { grid-template-columns: 1fr; }
+    .admin .row { flex-direction: column; align-items: stretch; }
+    .admin .row input, .admin .row select, .admin .row textarea { flex: 1; }
   }
+
+  /* ---------- 管理中心：数据维护 + 报告 ---------- */
+  .admin { margin-top: 14px; }
+  .admin .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .admin .tab-btn { padding: 7px 16px; border: 1px solid #334155; background: #1e293b; color: #cbd5e1; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .admin .tab-btn.active { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+  .admin .tab-pane { display: none; }
+  .admin .tab-pane.active { display: block; }
+  .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .admin .panel { padding: 12px 14px; }
+  .admin h3 { font-size: 14px; color: #e2e8f0; margin: 0 0 8px; }
+  .admin .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .admin input, .admin select, .admin textarea { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 4px; padding: 6px 8px; font-size: 12px; }
+  .admin input[type=file] { padding: 4px; }
+  .admin .btn { background: #0ea5e9; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
+  .admin .btn:hover { background: #0284c7; }
+  .admin .btn.danger { background: #dc2626; } .admin .btn.danger:hover { background: #b91c1c; }
+  .admin .btn.warn { background: #d97706; } .admin .btn.warn:hover { background: #b45309; }
+  .admin .btn.ghost { background: transparent; border: 1px solid #475569; color: #cbd5e1; }
+  .admin .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .admin table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .admin th, .admin td { padding: 6px 8px; border-bottom: 1px solid #1e293b; text-align: left; white-space: nowrap; }
+  .admin th { color: #94a3b8; font-weight: 600; background: #1e293b; }
+  .admin .table-wrap { max-height: 280px; overflow: auto; border: 1px solid #1e293b; border-radius: 4px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .badge.on { background: #065f46; color: #a7f3d0; }
+  .badge.off { background: #3f3f46; color: #d4d4d8; }
+  .badge.run { background: #1e3a8a; color: #bfdbfe; }
+  .badge.err { background: #7f1d1d; color: #fecaca; }
+  #toast { position: fixed; top: 14px; right: 14px; z-index: 9999; display: flex; flex-direction: column; gap: 6px; }
+  .toast-msg { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 8px 14px; border-radius: 6px; font-size: 12px; max-width: 360px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+  .toast-msg.ok { border-color: #059669; } .toast-msg.err { border-color: #dc2626; } .toast-msg.warn { border-color: #d97706; }
+  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 9000; }
+  .modal-mask.show { display: flex; }
+  .modal { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 16px; width: 520px; max-width: 92vw; max-height: 88vh; overflow: auto; }
+  .modal h3 { margin: 0 0 12px; color: #e2e8f0; }
+  .modal label { display: block; font-size: 12px; color: #94a3b8; margin: 8px 0 4px; }
+  .modal input, .modal select, .modal textarea { width: 100%; box-sizing: border-box; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; border-radius: 4px; padding: 7px 9px; font-size: 12px; }
+  .modal textarea { min-height: 140px; font-family: Consolas, monospace; }
+  .modal .row { justify-content: flex-end; margin-top: 12px; }
+  .rpt-preview { border: 1px solid #1e293b; border-radius: 4px; padding: 10px; max-height: 420px; overflow: auto; background: #0f172a; }
+  .rpt-section { margin-bottom: 10px; }
+  .rpt-section h4 { margin: 0 0 6px; font-size: 13px; color: #7dd3fc; }
+  .rpt-kpi { display: flex; flex-wrap: wrap; gap: 8px; }
+  .rpt-kpi .k { background: #1e293b; border-radius: 4px; padding: 6px 10px; font-size: 12px; }
+  .rpt-kpi .k b { color: #7dd3fc; display: block; font-size: 15px; }
+  .rpt-section table { font-size: 11px; }
+  .rpt-section table th, .rpt-section table td { padding: 4px 6px; }
 </style>
 </head>
 <body>
@@ -205,6 +256,117 @@
     </div>
   </div>
 </section>
+
+<!-- ============ 管理中心（B：数据维护 + 报告） ============ -->
+<section class="admin">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="dm">数据维护</button>
+    <button class="tab-btn" data-tab="rp">报告管理</button>
+  </div>
+
+  <!-- 数据维护 -->
+  <div class="tab-pane active" id="pane-dm">
+    <div class="admin-grid">
+      <div class="panel">
+        <h3>数据导出</h3>
+        <div class="row">
+          <button class="btn" onclick="exportData('csv')">导出 CSV</button>
+          <button class="btn" onclick="exportData('excel')">导出 Excel</button>
+          <button class="btn" onclick="exportData('json')">导出 JSON</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>数据导入</h3>
+        <div class="row">
+          <button class="btn ghost" onclick="downloadTemplate('excel')">下载 Excel 模板</button>
+          <button class="btn ghost" onclick="downloadTemplate('csv')">下载 CSV 模板</button>
+        </div>
+        <div class="row">
+          <input type="file" id="importFile" accept=".csv,.xls,.xlsx">
+          <button class="btn" onclick="uploadImport()">上传导入</button>
+          <span id="importInfo" style="font-size:12px;color:#94a3b8"></span>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h3>数据源管理</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>数据源</th><th>疾病</th><th>类型</th><th>状态</th><th>最后更新</th><th>增量</th><th>总记录</th><th>操作</th></tr></thead>
+        <tbody id="srcBody"><tr><td colspan="8" class="empty">加载中…</td></tr></tbody>
+      </table></div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h3>版本管理 <span style="font-size:11px;color:#94a3b8">（回滚会清空当前病例并恢复快照，操作不可撤销）</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>版本</th><th>操作人</th><th>时间</th><th>描述</th><th>记录数</th><th>增量</th><th>操作</th></tr></thead>
+        <tbody id="verBody"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <!-- 报告管理 -->
+  <div class="tab-pane" id="pane-rp">
+    <div class="admin-grid">
+      <div class="panel">
+        <h3>报告模板</h3>
+        <div class="row">
+          <button class="btn" onclick="openTplById(null)">+ 新建模板</button>
+          <button class="btn ghost" onclick="loadTemplates()">刷新</button>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>名称</th><th>类型</th><th>场景</th><th>状态</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody id="tplBody"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <h3>生成报告</h3>
+        <div class="row"><label style="font-size:12px;color:#94a3b8">模板</label>
+          <select id="rptTpl" style="flex:1;min-width:180px"></select></div>
+        <div class="row"><input id="rptTitle" placeholder="报告标题（可选）" style="flex:1;min-width:140px"></div>
+        <div class="row">
+          <input id="rptDisease" placeholder="疾病筛选（如 高血压）">
+          <input id="rptGender" placeholder="性别（男/女）">
+          <input id="rptHospital" placeholder="医院">
+        </div>
+        <div class="row">
+          <input id="rptStart" type="date">
+          <input id="rptEnd" type="date">
+          <button class="btn" onclick="generateReport()">生成预览</button>
+        </div>
+        <div class="row" id="rptExportRow" style="display:none">
+          <span style="font-size:12px;color:#94a3b8">导出：</span>
+          <button class="btn ghost" onclick="exportReportFmt('excel')">Excel</button>
+          <button class="btn ghost" onclick="exportReportFmt('csv')">CSV</button>
+          <button class="btn ghost" onclick="exportReportFmt('pdf')">PDF</button>
+          <button class="btn ghost" onclick="exportReportFmt('word')">Word</button>
+        </div>
+        <div class="rpt-preview" id="rptPreview"><span style="color:#64748b">选择筛选条件后点击「生成预览」</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 模板编辑弹窗 -->
+<div class="modal-mask" id="tplModal">
+  <div class="modal">
+    <h3 id="tplModalTitle">编辑模板</h3>
+    <input type="hidden" id="tplId">
+    <label>模板名称</label><input id="tplName" placeholder="例如：月度病例分析报告">
+    <label>类型</label>
+    <select id="tplType"><option value="text">文字报告</option><option value="report">综合报告</option></select>
+    <label>适用场景</label><input id="tplScene" placeholder="例如：月度统计 / 专项分析">
+    <label>状态</label>
+    <select id="tplStatus"><option value="draft">草稿</option><option value="published">已发布</option><option value="offline">已下架</option></select>
+    <label>区块配置（JSON，支持 text / kpi / table / chart）</label>
+    <textarea id="tplBlocks"></textarea>
+    <div class="row">
+      <button class="btn ghost" onclick="closeTplModal()">取消</button>
+      <button class="btn" onclick="saveTpl()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
@@ -453,7 +615,7 @@ function renderTable() {
 
   document.getElementById('tableBody').innerHTML = rows.length ? rows.map(c => `
     <tr>
-      <td>${c.id}</td><td>${c.type || ''}</td><td>${c.gender || ''}</td><td>${c.age || ''}</td>
+      <td>${c.id}</td><td>${c.type || ''}</td><td>${c.gender || ''}</td><td>${c.age || '—'}</td>
       <td>${c.time || ''}</td>
       <td class="content" title="${escapeAttr(c.content)}">${escapeHtml(c.content || '')}</td>
       <td>${c.docName || ''}</td><td>${c.docHospital || ''}</td><td>${c.department || ''}</td>
@@ -676,10 +838,248 @@ document.getElementById('chatSend').addEventListener('click', sendChat);
 document.getElementById('chatClear').addEventListener('click', clearChat);
 document.getElementById('chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
 
+/* ============== 管理中心：数据维护 + 报告（B） ============== */
+const _rptState = { sections: [], params: {}, templateId: null };
+let _tplCache = [];
+
+function toast(msg, type) {
+  const box = document.getElementById('toast');
+  const el = document.createElement('div');
+  el.className = 'toast-msg ' + (type || '');
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 3800);
+}
+
+document.querySelectorAll('.admin .tab-btn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.admin .tab-btn').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.admin .tab-pane').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  document.getElementById('pane-' + b.dataset.tab).classList.add('active');
+}));
+
+async function _get(url) {
+  try { const r = await fetch(url); return await r.json(); }
+  catch (e) { toast('网络错误：' + e.message, 'err'); return null; }
+}
+async function _post(url, body) {
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    return await r.json();
+  } catch (e) { toast('网络错误：' + e.message, 'err'); return null; }
+}
+function _fmt(v) { return (v === null || v === undefined || v === '') ? '—' : v; }
+
+/* ---------- 数据维护 ---------- */
+async function loadSources() {
+  const j = await _get('/data/sources');
+  const tb = document.getElementById('srcBody');
+  if (!j || j.code !== 200) { tb.innerHTML = `<tr><td colspan="8" class="empty">加载失败</td></tr>`; return; }
+  const rows = j.data || [];
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="empty">暂无数据源</td></tr>`; return; }
+  tb.innerHTML = rows.map(s => {
+    const cls = s.status === 'running' ? 'on' : s.status === 'collecting' ? 'run' : s.status === 'error' ? 'err' : 'off';
+    return `<tr>
+      <td><b>${escapeHtml(s.name)}</b><br><span style="color:#64748b;font-size:11px">${escapeHtml(s.code)}</span></td>
+      <td>${escapeHtml(s.disease || '—')}</td>
+      <td>${escapeHtml(s.type || '—')}</td>
+      <td><span class="badge ${cls}">${escapeHtml(s.statusLabel || s.status || '未知')}</span></td>
+      <td>${escapeHtml(s.lastUpdate || '—')}</td>
+      <td>${_fmt(s.lastDelta)}</td>
+      <td>${_fmt(s.totalRecords)}</td>
+      <td>
+        <button class="btn ${s.enabled ? 'warn' : 'ghost'}" onclick="toggleSource('${s.code}', ${!s.enabled})">${s.enabled ? '停用' : '启用'}</button>
+        <button class="btn ghost" onclick="runSource('${s.code}')">同步</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+async function toggleSource(code, enabled) {
+  const j = await _post(`/data/sources/${code}/toggle`, { enabled });
+  if (j && j.code === 200) { toast((j.data && j.data.enabled) ? '已启用' : '已停用', 'ok'); loadSources(); }
+  else toast((j && j.data && j.data.error) || '操作失败', 'err');
+}
+async function runSource(code) {
+  const j = await _post(`/data/sources/${code}/run`, {});
+  if (j && j.code === 200) { toast('已触发采集，请稍后刷新查看', 'ok'); setTimeout(loadSources, 1500); }
+  else toast((j && j.data && j.data.error) || '触发失败', 'err');
+}
+async function loadVersions() {
+  const j = await _get('/data/versions');
+  const tb = document.getElementById('verBody');
+  if (!j || j.code !== 200) { tb.innerHTML = `<tr><td colspan="7" class="empty">加载失败</td></tr>`; return; }
+  const rows = j.data || [];
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="7" class="empty">暂无版本记录</td></tr>`; return; }
+  tb.innerHTML = rows.map(v => `<tr>
+    <td>${escapeHtml(v.name || v.version || ('v' + v.id))}</td>
+    <td>${escapeHtml(v.operator || '—')}</td>
+    <td>${escapeHtml(v.time || '—')}</td>
+    <td>${escapeHtml(v.desc || '—')}</td>
+    <td>${_fmt(v.totalRecords)}</td>
+    <td>${_fmt(v.deltaRecords)}</td>
+    <td><button class="btn danger" onclick="rollbackVersion(${v.id}, '${escapeHtml(v.name || v.version || ('v' + v.id))}')">回滚</button></td>
+  </tr>`).join('');
+}
+async function rollbackVersion(id, name) {
+  if (!confirm(`确定回滚到版本「${name}」吗？\n此操作将清空当前病例并恢复到该版本快照，不可撤销。`)) return;
+  const j = await _post(`/data/versions/${id}/rollback`, {});
+  if (j && j.code === 200) { toast(`回滚成功：恢复至 ${j.data.after} 条`, 'ok'); loadVersions(); loadHome(); }
+  else toast((j && j.data && j.data.error) || '回滚失败', 'err');
+}
+function exportData(fmt) { window.location.href = '/data/export?format=' + encodeURIComponent(fmt); }
+function downloadTemplate(type) { window.location.href = '/data/import/template?type=' + encodeURIComponent(type); }
+async function uploadImport() {
+  const inp = document.getElementById('importFile');
+  const info = document.getElementById('importInfo');
+  const f = inp.files[0];
+  if (!f) { toast('请先选择文件', 'warn'); return; }
+  info.textContent = '上传中…';
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch('/data/import', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.code === 200) { toast(`导入成功，新增 ${j.data.inserted} 条`, 'ok'); info.textContent = `成功 ${j.data.inserted} 条`; loadHome(); }
+    else { toast('导入失败：' + ((j.data && j.data.error) || '未知错误'), 'err'); info.textContent = '导入失败'; }
+  } catch (e) { toast('上传错误：' + e.message, 'err'); info.textContent = '上传错误'; }
+}
+
+/* ---------- 报告模板 ---------- */
+const DEFAULT_BLOCKS = [
+  { type: 'text', title: '报告概述', content: '本报告基于当前筛选条件对病例数据进行统计分析。' },
+  { type: 'kpi', title: '关键指标' },
+  { type: 'table', title: '病例明细', limit: 50 }
+];
+const STATUS_MAP = { draft: '草稿', published: '已发布', offline: '已下架' };
+function _statusBadge(s) { const cls = s === 'published' ? 'on' : s === 'offline' ? 'off' : 'run'; return `<span class="badge ${cls}">${STATUS_MAP[s] || s || '—'}</span>`; }
+
+async function loadTemplates() {
+  const j = await _get('/templates');
+  const tb = document.getElementById('tplBody');
+  const sel = document.getElementById('rptTpl');
+  if (!j || j.code !== 200) { tb.innerHTML = `<tr><td colspan="7" class="empty">加载失败</td></tr>`; return; }
+  const rows = j.data || [];
+  _tplCache = rows;
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="7" class="empty">暂无模板，点击「新建模板」创建</td></tr>`; }
+  else {
+    tb.innerHTML = rows.map(t => `<tr>
+      <td>${escapeHtml(t.name)}</td>
+      <td>${escapeHtml(t.type || '—')}</td>
+      <td>${escapeHtml(t.scene || '—')}</td>
+      <td>${_statusBadge(t.status)}</td>
+      <td>${escapeHtml(t.version || '1.0')}</td>
+      <td>${escapeHtml(t.updatedAt || '—')}</td>
+      <td>
+        <button class="btn ghost" onclick="openTplById(${t.id})">编辑</button>
+        ${t.status !== 'published' ? `<button class="btn" onclick="publishTpl(${t.id})">发布</button>` : `<button class="btn warn" onclick="offlineTpl(${t.id})">下架</button>`}
+        <button class="btn danger" onclick="deleteTpl(${t.id}, '${escapeHtml(t.name)}')">删除</button>
+      </td>
+    </tr>`).join('');
+  }
+  sel.innerHTML = rows.length ? rows.map(t => `<option value="${t.id}">${escapeHtml(t.name)}（${STATUS_MAP[t.status] || t.status}）</option>`).join('') : '<option value="">暂无模板</option>';
+}
+function openTplById(id) {
+  const t = id ? (_tplCache.find(x => String(x.id) === String(id)) || {}) : {};
+  document.getElementById('tplId').value = t.id || '';
+  document.getElementById('tplName').value = t.name || '';
+  document.getElementById('tplType').value = t.type || 'report';
+  document.getElementById('tplScene').value = t.scene || '';
+  document.getElementById('tplStatus').value = t.status || 'draft';
+  document.getElementById('tplBlocks').value = JSON.stringify(t.blocks && t.blocks.length ? t.blocks : DEFAULT_BLOCKS, null, 2);
+  document.getElementById('tplModalTitle').textContent = id ? '编辑模板' : '新建模板';
+  document.getElementById('tplModal').classList.add('show');
+}
+function closeTplModal() { document.getElementById('tplModal').classList.remove('show'); }
+document.getElementById('tplModal').addEventListener('click', e => { if (e.target.id === 'tplModal') closeTplModal(); });
+
+async function saveTpl() {
+  let blocks;
+  try { blocks = JSON.parse(document.getElementById('tplBlocks').value || '[]'); }
+  catch (e) { toast('区块 JSON 格式错误', 'err'); return; }
+  const body = {
+    id: document.getElementById('tplId').value || ('tpl_' + Date.now()),
+    name: document.getElementById('tplName').value.trim(),
+    type: document.getElementById('tplType').value,
+    scene: document.getElementById('tplScene').value.trim(),
+    status: document.getElementById('tplStatus').value,
+    blocks
+  };
+  if (!body.name) { toast('请填写模板名称', 'warn'); return; }
+  const j = await _post('/templates/save', body);
+  if (j && j.code === 200) { toast('保存成功', 'ok'); closeTplModal(); loadTemplates(); }
+  else toast((j && j.data && j.data.error) || '保存失败', 'err');
+}
+async function publishTpl(id) { const j = await _post(`/templates/${id}/publish`, {}); if (j && j.code === 200) { toast('已发布', 'ok'); loadTemplates(); } else toast('发布失败', 'err'); }
+async function offlineTpl(id) { const j = await _post(`/templates/${id}/offline`, {}); if (j && j.code === 200) { toast('已下架', 'ok'); loadTemplates(); } else toast('下架失败', 'err'); }
+async function deleteTpl(id, name) {
+  if (!confirm(`确定删除模板「${name}」吗？`)) return;
+  try { const r = await fetch(`/templates/${id}`, { method: 'DELETE' }); const j = await r.json(); if (j.code === 200) { toast('已删除', 'ok'); loadTemplates(); } else toast('删除失败', 'err'); }
+  catch (e) { toast('删除错误', 'err'); }
+}
+
+/* ---------- 报告生成 / 预览 / 导出 ---------- */
+function _rptParams() {
+  return {
+    title: document.getElementById('rptTitle').value.trim() || '医疗数据分析报告',
+    startDate: document.getElementById('rptStart').value || '',
+    endDate: document.getElementById('rptEnd').value || '',
+    caseFilter: {
+      disease: document.getElementById('rptDisease').value.trim(),
+      gender: document.getElementById('rptGender').value.trim(),
+      hospital: document.getElementById('rptHospital').value.trim()
+    }
+  };
+}
+async function generateReport() {
+  const tplId = document.getElementById('rptTpl').value;
+  if (!tplId) { toast('请先选择模板', 'warn'); return; }
+  const prev = document.getElementById('rptPreview');
+  prev.innerHTML = '<span style="color:#64748b">生成中…</span>';
+  const params = _rptParams();
+  const j = await _post('/reports/generate', { templateId: tplId, params });
+  if (!j || j.code !== 200) { prev.innerHTML = `<span style="color:#f87171">生成失败：${(j && j.message) || '未知错误'}</span>`; return; }
+  _rptState.sections = j.data.sections || [];
+  _rptState.params = params;
+  _rptState.templateId = tplId;
+  document.getElementById('rptExportRow').style.display = 'flex';
+  if (!_rptState.sections.length) { prev.innerHTML = '<span style="color:#64748b">无内容（筛选条件可能无匹配病例）</span>'; return; }
+  prev.innerHTML = _rptState.sections.map(s => {
+    let body = '';
+    if (s.runtimeContent) body = `<div style="white-space:pre-wrap;font-size:12px;color:#cbd5e1">${escapeHtml(s.runtimeContent)}</div>`;
+    else if (s.runtimeKpi && s.runtimeKpi.length) body = `<div class="rpt-kpi">${s.runtimeKpi.map(k => `<div class="k"><b>${escapeHtml(k.value)}</b>${escapeHtml(k.label)}</div>`).join('')}</div>`;
+    else if (s.runtimeRows) {
+      const head = (s.runtimeHeader || []).map(h => `<th>${escapeHtml(h)}</th>`).join('');
+      const rws = s.runtimeRows.map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('');
+      body = `<table><thead><tr>${head}</tr></thead><tbody>${rws}</tbody></table>`;
+    } else if (s.runtimeImage) body = `<img src="${escapeAttr(s.runtimeImage)}" style="max-width:100%">`;
+    return `<div class="rpt-section"><h4>${escapeHtml(s.title || s.typeLabel || '')}</h4>${body}</div>`;
+  }).join('');
+}
+async function exportReportFmt(fmt) {
+  if (!_rptState.sections.length) { toast('请先生成预览', 'warn'); return; }
+  toast(`正在导出 ${fmt.toUpperCase()}…`, '');
+  try {
+    const r = await fetch('/reports/export', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateId: _rptState.templateId, params: _rptState.params, format: fmt, sections: _rptState.sections })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const fname = m ? m[1] : `report.${fmt === 'excel' ? 'xlsx' : (fmt === 'word' ? 'docx' : fmt)}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    toast('导出完成', 'ok');
+  } catch (e) { toast('导出失败：' + e.message, 'err'); }
+}
+
 loadHome();
 loadTable();
 initChat();
 initRealtime();
+loadSources();
+loadVersions();
+loadTemplates();
 </script>
 </body>
 </html>
